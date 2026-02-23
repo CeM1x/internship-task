@@ -1,6 +1,8 @@
-from app.core.enums import CurrencyEnum, TransactionTypeEnum
-from pydantic import BaseModel
 from decimal import Decimal
+
+from pydantic import BaseModel
+
+from app.core.enums import CurrencyEnum, TransactionTypeEnum
 
 
 class RequestTransactionModel(BaseModel):

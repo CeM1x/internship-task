@@ -1,10 +1,13 @@
-from sqlalchemy import ForeignKey, UniqueConstraint, Numeric
-from sqlalchemy.orm import relationship, validates, Mapped, mapped_column
+from decimal import Decimal
+
+from sqlalchemy import ForeignKey, Numeric, UniqueConstraint
+from sqlalchemy.dialects.postgresql import ENUM as PgEnum
+from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
+
 from app.core.db_base import Base, TimestampMixin
 from app.core.enums import CurrencyEnum
-from sqlalchemy.dialects.postgresql import ENUM as PgEnum
-from decimal import Decimal
-from app.core.exceptions import NegativeBalanceException, InvalidUserIdException
+from app.core.exceptions import InvalidUserIdException, NegativeBalanceException
+from app.models.user import User
 
 
 class UserBalance(TimestampMixin, Base):
@@ -12,14 +15,9 @@ class UserBalance(TimestampMixin, Base):
 
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     currency: Mapped[CurrencyEnum] = mapped_column(
-        PgEnum(CurrencyEnum,
-        name="user_balance_currency_enum"),
-        index=True
+        PgEnum(CurrencyEnum, name="user_balance_currency_enum"), index=True
     )
-    amount: Mapped[Decimal] = mapped_column(
-        Numeric(18, 6),
-        default=0
-    )
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 6), default=0)
 
     @validates("amount")
     def validate_amount(self, key, value):

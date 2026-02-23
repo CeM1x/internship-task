@@ -1,9 +1,11 @@
-from sqlalchemy.orm import relationship, Mapped, mapped_column
+from sqlalchemy.dialects.postgresql import ENUM as PgEnum
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy_utils import EmailType
+
 from app.core.db_base import Base, TimestampMixin
 from app.core.enums import UserStatusEnum
-from sqlalchemy.dialects.postgresql import ENUM as PgEnum
-from sqlalchemy_utils import EmailType
-from typing import List
+from app.models.balance import UserBalance
+from app.models.transaction import Transaction
 
 
 class User(TimestampMixin, Base):
@@ -16,5 +18,5 @@ class User(TimestampMixin, Base):
         index=True,
     )
 
-    balances: Mapped[List["UserBalance"]] = relationship(back_populates="user", lazy="selectin")
-    transactions: Mapped[List["Transaction"]] = relationship(back_populates="user", lazy="selectin")
+    balances: Mapped[list["UserBalance"]] = relationship(back_populates="user", lazy="selectin")
+    transactions: Mapped[list["Transaction"]] = relationship(back_populates="user", lazy="selectin")

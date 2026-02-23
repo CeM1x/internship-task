@@ -1,43 +1,44 @@
 import datetime
-from datetime import timedelta
-import uvicorn
-from fastapi import FastAPI, Depends
-from sqlalchemy import select, update, insert
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from fastapi import status
 import typing
+from datetime import timedelta
 
-from app.models.user import User
-from app.models.balance import UserBalance
-from app.models.transaction import Transaction
+import uvicorn
+from fastapi import Depends, FastAPI, status
+from sqlalchemy import insert, select, update
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+from app.core.db_base import Base
 from app.core.exceptions import (
+    BadRequestDataException,
+    CreateTransactionForBlockedUserException,
+    TransactionAlreadyRollbackedException,
+    TransactionDoesNotBelongToUserException,
+    TransactionNotExistsException,
+    UpdateTransactionForBlockedUserException,
+    UserAlreadyActiveException,
+    UserAlreadyBlockedException,
     UserAlreadyExistsException,
     UserNotExistsException,
-    UserAlreadyBlockedException,
-    UserAlreadyActiveException,
-    BadRequestDataException,
-    NegativeBalanceException,
-    TransactionNotExistsException,
-    TransactionDoesNotBelongToUserException,
-    UpdateTransactionForBlockedUserException,
-    TransactionAlreadyRollbackedException,
-    CreateTransactionForBlockedUserException,
 )
-from app.schemas.user.response import *
+from app.models.balance import UserBalance
+from app.models.transaction import Transaction
+from app.models.user import User
+from app.schemas.transaction.internal import *
+from app.schemas.transaction.request import *
 from app.schemas.user.internal import *
 from app.schemas.user.request import *
-from app.schemas.transaction.request import *
-from app.schemas.transaction.internal import *
-from queries import (
-    get_registered_users_count,
+from app.schemas.user.response import *
+from app.services.balance.repository import (
+    get_not_rollbacked_deposit_amount_in_USD,
+    get_not_rollbacked_withdraw_amount,
+)
+from app.services.transaction.repository import get_not_rollbacked_transactions_count, get_transactions_count
+from app.services.user.repository import (
     get_registered_and_deposit_users_count,
     get_registered_and_not_rollbacked_deposit_users_count,
-    get_not_rollbacked_deposit_amount,
-    get_not_rollbacked_withdraw_amount,
-    get_transactions_count,
-    get_not_rollbacked_transactions_count,
+    get_registered_users_count,
 )
-
+from app.workers.reports import generate_52_weeks_reports
 
 engine = create_async_engine("sqlite+aiosqlite:///db.sqlite3")
 async_session_maker = async_sessionmaker(engine, expire_on_commit=False)
@@ -56,6 +57,12 @@ async def get_async_session() -> typing.AsyncGenerator[AsyncSession, None]:
 app = FastAPI()
 
 
+@app.post("/reports/run")
+def run_reports():
+    generate_52_weeks_reports.send()
+    return {"status": "queued"}
+
+
 @app.on_event("startup")
 async def on_startup(session: AsyncSession = Depends(get_async_session)):
     await create_db_and_tables()
@@ -65,11 +72,11 @@ async def on_startup(session: AsyncSession = Depends(get_async_session)):
     "/users", response_model=typing.Optional[list[ResponseUserModel]] | None, status_code=status.HTTP_200_OK
 )
 async def get_users(
-    user_id: typing.Optional[int] = None,
-    email: typing.Optional[str] = None,
-    user_status: typing.Optional[str] = None,
+    user_id: int | None = None,
+    email: str | None = None,
+    user_status: str | None = None,
     session: AsyncSession = Depends(get_async_session),
-) -> typing.List[ResponseUserModel]:
+) -> list[ResponseUserModel]:
     q = select(User).order_by(User.created.desc())
     if user_id is not None:
         q = q.where(User.id == user_id)
@@ -106,7 +113,7 @@ async def post_user(user: RequestUserModel, session: AsyncSession = Depends(get_
     if db_user.scalar():
         raise UserAlreadyExistsException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="User with email=`{0}` already exists".format(user.email),
+            detail=f"User with email=`{user.email}` already exists",
         )
     db_user = User(email=user.email, status="ACTIVE", created=datetime.utcnow())
     session.add(db_user)
@@ -136,17 +143,17 @@ async def patch_user(
     db_user = db_user.scalar()
     if not db_user:
         raise UserNotExistsException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="User with id=`{0}` does not exist".format(user_id)
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"User with id=`{user_id}` does not exist"
         )
     if db_user.status == "BLOCKED" and user.status == "BLOCKED":
         raise UserAlreadyBlockedException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="User with id=`{0}` is already blocked".format(user_id),
+            detail=f"User with id=`{user_id}` is already blocked",
         )
     if db_user.status == "ACTIVE" and user.status == "ACTIVE":
         raise UserAlreadyActiveException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="User with id=`{0}` is already active".format(user_id),
+            detail=f"User with id=`{user_id}` is already active",
         )
     await session.execute(update(User).values(**{"status": user.status}).where(User.id == user_id))
     await session.commit()
@@ -162,8 +169,8 @@ async def patch_user(
     status_code=status.HTTP_200_OK,
 )
 async def get_transactions(
-    user_id: typing.Optional[int] = None, session: AsyncSession = Depends(get_async_session)
-) -> typing.List[TransactionModel]:
+    user_id: int | None = None, session: AsyncSession = Depends(get_async_session)
+) -> list[TransactionModel]:
     q = select(Transaction).order_by(Transaction.created.desc())
     if user_id:
         q = q.where(Transaction.user_id == user_id)
@@ -211,11 +218,11 @@ async def post_transaction(
     db_user = db_user.scalar()
     if not db_user:
         raise UserNotExistsException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="User with id=`{0}` does not exist".format(user_id)
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"User with id=`{user_id}` does not exist"
         )
     if db_user.status != "ACTIVE":
         raise CreateTransactionForBlockedUserException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="User with id=`{0}` is blocked".format(user_id)
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"User with id=`{user_id}` is blocked"
         )
 
     db_user_balance = await session.execute(
@@ -261,30 +268,28 @@ async def patch_rollback_transaction(
     db_user = db_user.scalar()
     if not db_user:
         raise UserNotExistsException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="User with id=`{0}` does not exist".format(user_id)
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"User with id=`{user_id}` does not exist"
         )
     db_transaction = await session.execute(select(Transaction).where(Transaction.id == transaction_id))
     db_transaction = db_transaction.scalar()
     if not db_transaction:
         raise TransactionNotExistsException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Transaction with id=`{0}` does not exist".format(transaction_id),
+            detail=f"Transaction with id=`{transaction_id}` does not exist",
         )
     if db_transaction.user_id != db_user.id:
         raise TransactionDoesNotBelongToUserException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Transaction with id=`{0}` does not belong to user with id=`{1}`".format(
-                transaction_id, user_id
-            ),
+            detail=f"Transaction with id=`{transaction_id}` does not belong to user with id=`{user_id}`",
         )
     if db_transaction.status == "ROLLBACKED":
         raise TransactionAlreadyRollbackedException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Transaction with id=`{0}` is already rollbacked".format(transaction_id),
+            detail=f"Transaction with id=`{transaction_id}` is already rollbacked",
         )
     if db_user.status == "BLOCKED":
         raise UpdateTransactionForBlockedUserException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="User with id=`{0}` is blocked".format(user_id)
+            status_code=status.HTTP_400_BAD_REQUEST, detail=f"User with id=`{user_id}` is blocked"
         )
 
     db_user_balance = await session.execute(
@@ -313,11 +318,11 @@ async def patch_rollback_transaction(
 @app.get(
     "/transactions/analysis", response_model=typing.Optional[list] | None, status_code=status.HTTP_200_OK
 )
-async def get_transaction_analysis(session: AsyncSession = Depends(get_async_session)) -> typing.List[dict]:
+async def get_transaction_analysis(session: AsyncSession = Depends(get_async_session)) -> list[dict]:
     dt_gt = datetime.utcnow().date() - timedelta(weeks=1) + timedelta(days=1)
     dt_lt = datetime.utcnow().date()
     results = []
-    for i in range(52):
+    for _i in range(52):
         registered_users_count = await get_registered_users_count(session, dt_gt=dt_gt, dt_lt=dt_lt)
         registered_and_deposit_users_count = await get_registered_and_deposit_users_count(
             session, dt_gt=dt_gt, dt_lt=dt_lt
@@ -325,7 +330,7 @@ async def get_transaction_analysis(session: AsyncSession = Depends(get_async_ses
         registered_and_not_rollbacked_deposit_users_count = (
             await get_registered_and_not_rollbacked_deposit_users_count(session, dt_gt=dt_gt, dt_lt=dt_lt)
         )
-        not_rollbacked_deposit_amount = await get_not_rollbacked_deposit_amount(
+        not_rollbacked_deposit_amount = await get_not_rollbacked_deposit_amount_in_USD(
             session, dt_gt=dt_gt, dt_lt=dt_lt
         )
         not_rollbacked_withdraw_amount = await get_not_rollbacked_withdraw_amount(

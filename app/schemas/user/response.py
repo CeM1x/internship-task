@@ -1,5 +1,7 @@
 from datetime import datetime
+
 from pydantic import BaseModel, EmailStr
+
 from app.core.enums import UserStatusEnum
 from app.schemas.balance.response import ResponseUserBalanceModel
 

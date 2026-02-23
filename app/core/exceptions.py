@@ -18,6 +18,7 @@ class BadRequestDataException(HTTPException): ...
 
 class NegativeBalanceException(HTTPException):
     """Amount cannot be negative"""
+
     def __init__(self, detail: str = "Amount cannot be negative"):
         super().__init__(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
 
