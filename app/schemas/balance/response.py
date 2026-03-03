@@ -1,6 +1,8 @@
-from app.core.enums import CurrencyEnum
-from pydantic import BaseModel
 from decimal import Decimal
+
+from pydantic import BaseModel
+
+from app.core.enums import CurrencyEnum
 
 
 class ResponseUserBalanceModel(BaseModel):

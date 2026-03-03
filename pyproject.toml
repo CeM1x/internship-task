@@ -14,6 +14,9 @@ httpx = "^0.25.0"
 fastapi = "^0.115.6"
 sqlalchemy = "^2.0.37"
 aiosqlite = "^0.20.0"
+dramatiq = {extras = ["redis"], version = "^2.0.1"}
+asyncpg = "^0.31.0"
+email-validator = "^2.3.0"
 
 
 [tool.poetry.group.dev.dependencies]
