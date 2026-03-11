@@ -9,3 +9,4 @@ class RequestUserModel(BaseModel):
 
 class RequestUserUpdateModel(BaseModel):
     status: UserStatusEnum
+    email: str | None = None

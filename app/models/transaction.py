@@ -6,7 +6,6 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db_base import Base, TimestampMixin
 from app.core.enums import CurrencyEnum, TransactionStatusEnum, TransactionTypeEnum
-from app.models.user import User
 
 
 class Transaction(TimestampMixin, Base):

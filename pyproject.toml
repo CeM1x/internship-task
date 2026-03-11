@@ -17,6 +17,7 @@ aiosqlite = "^0.20.0"
 dramatiq = {extras = ["redis"], version = "^2.0.1"}
 asyncpg = "^0.31.0"
 email-validator = "^2.3.0"
+dotenv = "^0.9.9"
 
 
 [tool.poetry.group.dev.dependencies]
