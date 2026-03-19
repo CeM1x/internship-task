@@ -7,7 +7,6 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 from app.core.db_base import Base, TimestampMixin
 from app.core.enums import CurrencyEnum
 from app.core.exceptions import InvalidUserIdException, NegativeBalanceException
-from app.models.user import User
 
 
 class UserBalance(TimestampMixin, Base):

@@ -4,8 +4,6 @@ from sqlalchemy_utils import EmailType
 
 from app.core.db_base import Base, TimestampMixin
 from app.core.enums import UserStatusEnum
-from app.models.balance import UserBalance
-from app.models.transaction import Transaction
 
 
 class User(TimestampMixin, Base):
