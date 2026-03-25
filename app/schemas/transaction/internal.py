@@ -19,9 +19,6 @@ class TransactionModel(BaseModel):
 
     @model_validator(mode="after")
     def validate_fields(self):
-        if self.amount < 0:
-            raise NegativeBalanceException("Balance must be >= 0")
-
         if self.user_id is not None and self.user_id <= 0:
             raise InvalidUserIdException()
 

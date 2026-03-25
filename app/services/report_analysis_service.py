@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 
 from app.schemas.report.weekly import WeeklyReport
 from app.services.report_service import ReportService
@@ -10,7 +10,7 @@ class ReportAnalysisService:
         self.report_service = ReportService(session)
 
     async def build_52_weeks_analysis(self) -> list[WeeklyReport]:
-        today = date.today()
+        today = datetime.now(UTC)
         results: list[WeeklyReport] = []
 
         for i in range(52):

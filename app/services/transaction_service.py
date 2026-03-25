@@ -1,3 +1,4 @@
+from decimal import Decimal
 from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,8 +17,9 @@ from app.core.exceptions import (
 from app.repositories.balance_repository import BalanceRepository
 from app.repositories.transaction_repository import TransactionRepository
 from app.repositories.user_repository import UserRepository
+from app.schemas.balance.response import ResponseUserBalanceModel
 from app.schemas.transaction.internal import TransactionModel
-from app.schemas.transaction.request import RequestTransactionModel
+from app.schemas.transaction.request import RequestDepositModel, RequestTransactionModel, RequestWithdrawModel
 
 
 class TransactionService:
@@ -70,15 +72,14 @@ class TransactionService:
         if new_amount < 0:
             raise NegativeBalanceException("Negative balance")
 
-        async with self.session.begin():
-            await self.balances.update_balance(balance.id, new_amount)
-            created_tx = await self.transactions.create_transaction(
-                user_id=user_id,
-                currency=transaction.currency,
-                amount=transaction.amount,
-                status=TransactionStatusEnum.PROCESSED,
-                type=transaction.type,
-            )
+        await self.balances.update_balance(balance.id, new_amount)
+        created_tx = await self.transactions.create_transaction(
+            user_id=user_id,
+            currency=transaction.currency,
+            amount=transaction.amount,
+            status=TransactionStatusEnum.PROCESSED,
+            tx_type=transaction.type,
+        )
         return TransactionModel.model_validate(created_tx)
 
     async def rollback_transaction(self, user_id: int, transaction_id: int) -> TransactionModel:
@@ -107,16 +108,108 @@ class TransactionService:
         if not balance:
             raise BadRequestDataException("Balance for this currency does not exist")
 
-        if transaction.amount < 0:
-            new_amount = balance.amount + abs(transaction.amount)
-        else:
+        if transaction.type == TransactionTypeEnum.DEPOSIT:
             new_amount = balance.amount - transaction.amount
+            if new_amount < 0:
+                raise NegativeBalanceException(f"Negative balance: {new_amount}")
+
+        else:  # WITHDRAW
+            if balance.amount < transaction.amount:
+                raise NegativeBalanceException(f"Negative balance: {balance.amount - transaction.amount}")
+
+            new_amount = balance.amount + transaction.amount
 
         if new_amount < 0:
             raise NegativeBalanceException(f"Negative balance: {new_amount}")
 
-        async with self.session.begin():
-            await self.balances.update_balance(balance.id, new_amount)
-            updated_tx = await self.transactions.mark_transaction_rollbacked(transaction_id)
+        await self.balances.update_balance(balance.id, new_amount)
+        updated_tx = await self.transactions.mark_transaction_rollbacked(transaction_id)
+        await self.session.commit()
 
         return TransactionModel.model_validate(updated_tx)
+
+    async def deposit(self, user_id: int, data: RequestDepositModel):
+        # валидация пользователя
+        user = await self.users.get_user_by_id(user_id)
+        if not user:
+            raise UserNotExistsException(f"User with id=`{user_id}` does not exist")
+
+        # ищем баланс
+        balance = await self.balances.get_balance_for_user_with_currency(user_id, data.currency)
+
+        # если нет — создаём
+        if not balance:
+            balance = await self.balances.create_balance(user_id, data.currency, Decimal("0"))
+
+        # обновляем сумму
+        new_amount = balance.amount + data.amount
+
+        # обновляем баланс
+        await self.balances.update_balance(balance.id, new_amount)
+
+        # фиксируем изменения и обновляем объект в памяти
+        await self.session.commit()
+        await self.session.refresh(balance)
+
+        # создаём транзакцию
+        created_tx = await self.transactions.create_transaction(
+            user_id=user_id,
+            currency=data.currency,
+            amount=data.amount,
+            status=TransactionStatusEnum.PROCESSED,
+            tx_type=TransactionTypeEnum.DEPOSIT,
+        )
+
+        # фиксируем изменения
+        await self.session.commit()
+
+        return {"id": created_tx.id, "currency": data.currency, "amount": float(new_amount)}
+
+    async def withdraw(self, user_id: int, data: RequestWithdrawModel):
+        # проверяем валюту
+        try:
+            currency = CurrencyEnum(data.currency)
+        except ValueError:
+            raise BadRequestDataException("Invalid currency")
+
+        # проверяем пользователя
+        user = await self.users.get_user_by_id(user_id)
+        if not user:
+            raise UserNotExistsException(f"User with id=`{user_id}` does not exist")
+
+        # получаем баланс
+        balance = await self.balances.get_balance_for_user_with_currency(user_id, currency)
+
+        # если баланса нет — это insufficient funds
+        if not balance:
+            raise NegativeBalanceException("Insufficient funds")
+
+        # проверяем достаточно ли средств
+        if balance.amount < data.amount:
+            raise NegativeBalanceException("Insufficient funds")
+
+        # считаем новый баланс
+        new_amount = balance.amount - data.amount
+
+        # 1. создаём транзакцию
+        created_tx = await self.transactions.create_transaction(
+            user_id=user_id,
+            currency=currency,
+            amount=-data.amount,
+            status=TransactionStatusEnum.PROCESSED,
+            tx_type=TransactionTypeEnum.WITHDRAW,
+        )
+
+        # 2. обновляем баланс
+        await self.balances.update_balance(balance.id, new_amount)
+
+        # 3. фиксируем всё одним коммитом
+        await self.session.commit()
+
+        # возвращаем остаток
+        return {"id": created_tx.id, "currency": currency.value, "amount": float(new_amount)}
+
+    async def get_user_balances(self, user_id: int):
+        balances = await self.transactions.get_user_balances(user_id)
+
+        return [ResponseUserBalanceModel(currency=b.currency, amount=b.amount) for b in balances]

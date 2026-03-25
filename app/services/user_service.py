@@ -2,7 +2,7 @@ from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.enums import UserStatusEnum
+from app.core.enums import CurrencyEnum, UserStatusEnum
 from app.core.exceptions import (
     BadRequestDataException,
     UserAlreadyActiveException,
@@ -68,18 +68,15 @@ class UserService:
             raise UserAlreadyExistsException(f"User with email {email} already exists")
 
         user = await self.users.create_user(email=email)
-        await self.balances.create_initial_balances(user.id)
 
         await self.session.commit()
 
-        user = await self.users.get_user_by_id(user.id)
-
         return ResponseUserModel(
             id=user.id,
-            email=email,
+            email=user.email,
             status=user.status,
             created_at=user.created_at,
-            balances=[ResponseUserBalanceModel(currency=b.currency, amount=b.amount) for b in user.balances],
+            balances=[ResponseUserBalanceModel(currency=c.value, amount=0) for c in CurrencyEnum],
         )
 
     async def update_user(self, user_id: int, data: RequestUserUpdateModel) -> ResponseUserModel:
@@ -115,8 +112,9 @@ class UserService:
         if not fields_to_update:
             raise BadRequestDataException("No fields to update")
 
-        async with self.session.begin():
-            updated = await self.users.update_status(user_id, fields_to_update)
+        updated = await self.users.update_status(user_id, fields_to_update)
+        await self.session.commit()
+        await self.session.refresh(updated)
 
         return ResponseUserModel(
             id=updated.id,

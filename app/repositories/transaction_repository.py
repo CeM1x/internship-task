@@ -13,6 +13,7 @@ from app.db.helpers import (
     NOT_ROLLBACKED,
     between_dates,
 )
+from app.models.balance import UserBalance
 from app.models.transaction import Transaction
 from app.repositories.currency_repository import CurrencyRepository
 
@@ -36,31 +37,27 @@ class TransactionRepository:
 
     async def sum_by_currency(self, dt_gt, dt_lt, *filters):
         """Сумма транзакций по валютам с учётом фильтров"""
+        q = (
+            select(Transaction.currency, func.sum(Transaction.amount))
+            .where(between_dates(Transaction.created_at, dt_gt, dt_lt), *filters)
+            .group_by(Transaction.currency)
+        )
+        rows = (await self.session.execute(q)).all()
 
-        async with self.session.begin():
-            q = (
-                select(Transaction.currency, func.sum(Transaction.amount))
-                .where(between_dates(Transaction.created_at, dt_gt, dt_lt), *filters)
-                .group_by(Transaction.currency)
-                .with_for_update()
-            )
-            rows = (await self.session.execute(q)).all()
+        result = {}
+        for currency, amount in rows:
+            result[currency] = amount or Decimal("0")
 
-            result = {}
-            for currency, amount in rows:
-                result[currency] = amount or Decimal("0")
-
-            return result.items()
+        return result.items()
 
     async def get_not_rollbacked_deposit_amount_in_USD(self, dt_gt: date, dt_lt: date):
         rows = await self.sum_by_currency(dt_gt, dt_lt, IS_DEPOSIT, NOT_ROLLBACKED)
 
         return sum(self.currency.convert_to_usd(currency, amount) for currency, amount in rows)
 
-    async def get_not_rollbacked_withdraw_amount(self, dt_gt: date, dt_lt: date):
+    async def get_not_rollbacked_withdraw_amount_in_USD(self, dt_gt: date, dt_lt: date):
         rows = await self.sum_by_currency(dt_gt, dt_lt, IS_WITHDRAW, NOT_ROLLBACKED)
-
-        return sum(self.currency.convert_to_usd(currency, amount) for currency, amount in rows)
+        return sum(abs(self.currency.convert_to_usd(currency, amount)) for currency, amount in rows)
 
     async def get_transactions_list_by_user_id(self, user_id: Optional[int] = None):
         q = (
@@ -109,3 +106,8 @@ class TransactionRepository:
             .returning(Transaction)
         )
         return result.scalar_one()
+
+    async def get_user_balances(self, user_id: int):
+        q = select(UserBalance).where(UserBalance.user_id == user_id)
+        result = await self.session.execute(q)
+        return result.scalars().all()

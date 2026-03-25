@@ -13,8 +13,8 @@ class ReportService:
 
     async def build_week_report(self, week_start: date, week_end: date) -> WeeklyReport:
         return WeeklyReport(
-            week_start=week_start,
-            week_end=week_end,
+            week_start=week_start.date(),
+            week_end=week_end.date(),
             registered_users=await self.users.get_registered_users_count(week_start, week_end),
             deposit_users_including_rollbacked=await self.users.get_registered_and_deposit_users_count(
                 week_start, week_end
@@ -23,7 +23,7 @@ class ReportService:
                 week_start, week_end
             ),
             deposit_amount_usd=await self.tx.get_not_rollbacked_deposit_amount_in_USD(week_start, week_end),
-            withdraw_amount_usd=await self.tx.get_not_rollbacked_withdraw_amount(week_start, week_end),
+            withdraw_amount_usd=await self.tx.get_not_rollbacked_withdraw_amount_in_USD(week_start, week_end),
             transactions_total=await self.tx.get_transactions_count(week_start, week_end),
             transactions_without_rollback=await self.tx.get_not_rollbacked_transactions_count(
                 week_start, week_end

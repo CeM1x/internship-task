@@ -14,3 +14,5 @@ class WeeklyReport(BaseModel):
     withdraw_amount_usd: Decimal
     transactions_total: int
     transactions_without_rollback: int
+
+    model_config = {"json_encoders": {Decimal: lambda v: float(v)}}
