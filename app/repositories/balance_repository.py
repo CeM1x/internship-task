@@ -16,11 +16,11 @@ class BalanceRepository:
         result = await self.session.execute(select(UserBalance).where(UserBalance.user_id == user_id))
         return result.scalars().all()
 
-    async def create_initial_balances(self, user_id: int) -> None:
-        for currency in CurrencyEnum:
-            balance = UserBalance(user_id=user_id, currency=currency, amount=0)
-            self.session.add(balance)
-        await self.session.commit()
+    async def create_balance(self, user_id: int, currency: CurrencyEnum, amount: Decimal):
+        balance = UserBalance(user_id=user_id, currency=currency, amount=amount)
+        self.session.add(balance)
+        await self.session.flush()
+        return balance
 
     async def get_balance_for_user_with_currency(
         self, user_id: int, currency: CurrencyEnum

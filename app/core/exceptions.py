@@ -23,7 +23,7 @@ class UserAlreadyActiveException(HTTPException):
 
 class BadRequestDataException(HTTPException):
     def __init__(self, detail: str = "Bad Request"):
-        super().__init__(status_code=422, detail=detail)
+        super().__init__(status_code=400, detail=detail)
 
 
 class NegativeBalanceException(HTTPException):

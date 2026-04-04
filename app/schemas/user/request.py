@@ -8,5 +8,5 @@ class RequestUserModel(BaseModel):
 
 
 class RequestUserUpdateModel(BaseModel):
-    status: UserStatusEnum
+    status: UserStatusEnum | None = None
     email: str | None = None
